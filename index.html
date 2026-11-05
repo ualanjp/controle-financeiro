@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Controle Financeiro</title>
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Controle financeiro pessoal, 100% offline">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./assets/icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="./assets/icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Finanças">
+  <link rel="stylesheet" href="./assets/css/app.css">
+  <script src="./assets/vendor/chart.umd.js" defer></script>
+  <script type="module" src="./assets/js/app.js"></script>
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-linha">
+      <button id="voltar" class="btn-voltar" hidden aria-label="Voltar">‹</button>
+      <h1 id="titulo">Controle Financeiro</h1>
+    </div>
+    <div id="nav-mes" class="nav-mes" hidden>
+      <button id="mes-ant" class="mes-seta" aria-label="Mês anterior">‹</button>
+      <button id="mes-nome" class="mes-nome" title="Voltar para o mês atual"></button>
+      <button id="mes-prox" class="mes-seta" aria-label="Próximo mês">›</button>
+    </div>
+  </header>
+
+  <main id="conteudo" class="conteudo">
+    <div class="vazio">Carregando…</div>
+  </main>
+
+  <nav class="barra" id="barra" aria-label="Navegação principal">
+    <a href="#/inicio" data-aba="inicio"><span class="ic">📊</span>Início</a>
+    <a href="#/despesas" data-aba="despesas"><span class="ic">💳</span>Despesas</a>
+    <a href="#/orcamento" data-aba="orcamento"><span class="ic">🎯</span>Orçamento</a>
+    <a href="#/cambio" data-aba="cambio"><span class="ic">💱</span>Câmbio</a>
+    <a href="#/mais" data-aba="mais"><span class="ic">☰</span>Mais</a>
+  </nav>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

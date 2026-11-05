@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Testes · Controle Financeiro</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; max-width: 860px; margin: 0 auto; padding: 16px; background: #f4f5f7; color: #1f2430; }
+    @media (prefers-color-scheme: dark) { body { background: #0b0e14; color: #e7e9ee; } }
+    h1 { font-size: 20px; }
+    #resumo { font-size: 18px; font-weight: 700; padding: 12px; border-radius: 10px; }
+    .ok { color: #059669; } .falha { color: #dc2626; }
+    #resumo.ok { background: #05966922; } #resumo.falha { background: #dc262622; }
+    li { margin: 2px 0; } pre { white-space: pre-wrap; margin: 2px 0 6px 18px; font-size: 12px; }
+    h2 { font-size: 15px; margin: 18px 0 4px; }
+  </style>
+</head>
+<body>
+  <h1>Testes das regras de cálculo</h1>
+  <div id="resumo">Rodando…</div>
+  <div id="saida"></div>
+<script type="module">
+import { usarBanco, todos, tx } from './assets/js/db.js';
+import { parseValor, addMes, dataNoMes, parseTaxa } from './assets/js/util.js';
+import { converterCentavos, converter, criarSoma, moedasSemTaxa } from './assets/js/servicos/cambio.js';
+import * as D from './assets/js/servicos/despesas.js';
+import { nivelOrcamento, linhasOrcamento, planejarCopiaOrcamento } from './assets/js/servicos/orcamento.js';
+import { budgetDoMes, poupancaAte, savingsAte, saldoManual, mesesFechados, variacaoPct, listaMovimentacoes, evolucao } from './assets/js/servicos/saldos.js';
+import { resumoDashboard } from './assets/js/servicos/dashboard.js';
+import { validarBackup } from './assets/js/servicos/backup.js';
+
+const saida = document.getElementById('saida');
+let ok = 0, falhas = 0, grupo = null;
+const escH = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+function secao(nome) { const h = document.createElement('h2'); h.textContent = nome; saida.append(h); grupo = document.createElement('ul'); saida.append(grupo); }
+function registrar(passou, nome, detalhe = '') {
+  passou ? ok++ : falhas++;
+  const li = document.createElement('li');
+  li.className = passou ? 'ok' : 'falha';
+  li.innerHTML = `${passou ? '✔' : '✘'} ${escH(nome)}${detalhe ? `<pre>${escH(detalhe)}</pre>` : ''}`;
+  grupo.append(li);
+}
+const igual = (nome, obtido, esperado) => {
+  const a = JSON.stringify(obtido), b = JSON.stringify(esperado);
+  registrar(a === b, nome, a === b ? '' : `esperado: ${b}\nobtido:   ${a}`);
+};
+const lanca = (nome, fn, trecho) => {
+  try { fn(); registrar(false, nome, 'deveria lançar erro'); }
+  catch (e) { registrar(!trecho || e.message.includes(trecho), nome, !trecho || e.message.includes(trecho) ? '' : `mensagem: ${e.message}`); }
+};
+
+// ---------- Dados de exemplo ----------
+const POUP = 9, MORADIA = 1, LAZER = 6;
+function novosDados(extra = {}) {
+  return {
+    config: { chave: 'principal', moedaBase: 'AED', outrasMoedas: ['USD', 'BRL'], categoriaPoupancaId: POUP, ultimoBackup: null, versaoEsquema: 1 },
+    categorias: [
+      { id: MORADIA, nome: 'Moradia', cor: '#2a78d6', arquivada: false },
+      { id: 2, nome: 'Alimentação', cor: '#1baf7a', arquivada: false },
+      { id: LAZER, nome: 'Lazer', cor: '#e34948', arquivada: false },
+      { id: POUP, nome: 'Poupança e investimento', cor: '#0e7490', arquivada: false },
+    ],
+    formasPagamento: [{ id: 1, nome: 'Dinheiro', arquivada: false }],
+    taxasCambio: [], orcamentos: [], series: [], despesas: [],
+    saldosManuais: [{ id: 1, nome: 'Bonus', ordem: 1, arquivado: false }, { id: 2, nome: 'Investido', ordem: 2, arquivado: false }],
+    movimentacoes: [],
+    ...extra,
+  };
+}
+let seq = 1000;
+const desp = (o) => ({ id: seq++, serieId: null, nome: 'X', moeda: 'AED', categoriaId: MORADIA, formaPagamentoId: 1, fonteSaldo: 'budget', tipo: 'unica', status: 'pendente', dataPagamento: null, dataVencimento: null, editadaIndividualmente: false, ...o });
+const paga = (mes, valor, o = {}) => desp({ mes, valor, status: 'paga', dataPagamento: `${mes}-10`, ...o });
+const form = (o) => ({ nome: 'Teste', valor: 10000, moeda: 'AED', categoriaId: MORADIA, formaPagamentoId: 1, fonteSaldo: 'budget', mes: '2026-11', ...o });
+
+try {
+// =====================================================================
+secao('Utilitários');
+igual('parseValor "1.234,56" → 123456', parseValor('1.234,56'), 123456);
+igual('parseValor "10" → 1000', parseValor('10'), 1000);
+igual('parseValor "0,1" → 10', parseValor('0,1'), 10);
+igual('parseValor "12.5" → 1250', parseValor('12.5'), 1250);
+igual('parseValor "abc" → null', parseValor('abc'), null);
+igual('addMes 2026-11 + 3 → 2027-02', addMes('2026-11', 3), '2027-02');
+igual('addMes 2026-01 − 1 → 2025-12', addMes('2026-01', -1), '2025-12');
+igual('dataNoMes(2027-02, 31) → 2027-02-28', dataNoMes('2027-02', 31), '2027-02-28');
+igual('parseTaxa "3,6725" → 3.6725', parseTaxa('3,6725'), 3.6725);
+
+// =====================================================================
+secao('Divisão de parcelas (resto de centavos na última)');
+igual('100,00 em 3 → 33,33 + 33,33 + 33,34', D.dividirParcelas(10000, 3), [3333, 3333, 3334]);
+igual('1,00 em 7 → seis de 0,14 e última 0,16', D.dividirParcelas(100, 7), [14, 14, 14, 14, 14, 14, 16]);
+igual('soma de 999,99 em 12 bate exatamente', D.dividirParcelas(99999, 12).reduce((a, b) => a + b), 99999);
+{
+  const { serie, despesas } = D.montarParcelada(form({ valor: 10000, numeroParcelas: 3, mes: '2026-11', dataVencimento: '2026-11-31'.replace('31', '30') }), '2026-12');
+  igual('parcelas nos meses 11, 12, 01', despesas.map((d) => d.mes), ['2026-11', '2026-12', '2027-01']);
+  igual('status: pendente até o mês atual, prevista depois', despesas.map((d) => d.status), ['pendente', 'pendente', 'prevista']);
+  igual('nome exibido "Teste (2/3)"', D.nomeExibicao(despesas[1]), 'Teste (2/3)');
+  igual('série guarda total e nº de parcelas', [serie.valorTotal, serie.numeroParcelas, serie.tipo], [10000, 3, 'parcelada']);
+  igual('vencimento repete o dia (30 → 28/fev não se aplica; jan = 30)', despesas[2].dataVencimento, '2027-01-30');
+}
+lanca('parcelada com 1 parcela é recusada', () => D.montarParcelada(form({ numeroParcelas: 1 })), 'mínimo 2 parcelas');
+
+// =====================================================================
+secao('Despesas fixas: geração sob demanda sem duplicar');
+{
+  const s = { id: 1, ...D.montarSerieFixa(form({ nome: 'Aluguel', valor: 500000, mes: '2026-09' })) };
+  igual('gera 1 ocorrência em 2026-11', D.fixasParaGerar([s], [], ['2026-11'], '2026-11').length, 1);
+  igual('não gera antes do mês de início', D.fixasParaGerar([s], [], ['2026-08'], '2026-11').length, 0);
+  const existente = D.ocorrenciaFixa(s, '2026-11', '2026-11');
+  igual('não duplica se já existe', D.fixasParaGerar([s], [existente], ['2026-11'], '2026-11').length, 0);
+  igual('mês repetido na lista não duplica', D.fixasParaGerar([s], [], ['2026-11', '2026-11'], '2026-11').length, 1);
+  igual('mês futuro nasce "prevista"', D.fixasParaGerar([s], [], ['2027-01'], '2026-11')[0].status, 'prevista');
+  const enc = D.encerrar(s, '2026-12');
+  igual('encerrada em 12 → mesEncerramento 2026-11', enc.mesEncerramento, '2026-11');
+  igual('encerrada não gera em 2026-12', D.fixasParaGerar([enc], [], ['2026-12'], '2026-11').length, 0);
+  igual('encerrada ainda gera em 2026-11', D.fixasParaGerar([enc], [], ['2026-11'], '2026-11').length, 1);
+  const excl = { ...s, mesesExcluidos: ['2026-10'] };
+  igual('mês excluído ("somente esta") não é recriado', D.fixasParaGerar([excl], [], ['2026-10'], '2026-11').length, 0);
+}
+
+// =====================================================================
+secao('Edição "esta e as próximas" e exclusões');
+{
+  const serie = { id: 7, ...D.montarSerieFixa(form({ nome: 'Academia', valor: 20000, mes: '2026-01' })) };
+  const occ = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05'].map((m, i) => ({ id: i + 1, ...D.ocorrenciaFixa(serie, m, '2026-03') }));
+  occ[1] = { ...occ[1], status: 'paga', dataPagamento: '2026-02-05' };     // fev: paga (no futuro da edição? não — anterior)
+  occ[3] = { ...occ[3], status: 'paga', dataPagamento: '2026-03-28' };     // abr: paga antecipada
+  occ[4] = { ...occ[4], editadaIndividualmente: true, valor: 99 };         // mai: editada individualmente
+  const dados = novosDados({ series: [serie], despesas: occ });
+  const alvo = occ[2]; // março
+  const p = D.planejarEdicao(dados, alvo, { ...alvo, valor: 25000, nome: 'Academia Nova', dataVencimento: '2026-03-15' }, 'proximas', '2026-03-10');
+  igual('altera só março (as demais futuras estão pagas/editadas)', p.despesas.map((d) => d.mes), ['2026-03']);
+  igual('molde da série atualizado (valor e nome)', [p.serie.valorParcela, p.serie.nome, p.serie.diaVencimento], [25000, 'Academia Nova', 15]);
+  // Sem pagas/editadas: aplica a todas as futuras
+  const occ2 = ['2026-03', '2026-04', '2026-05'].map((m, i) => ({ id: 10 + i, ...D.ocorrenciaFixa(serie, m, '2026-03') }));
+  const dados2 = novosDados({ series: [serie], despesas: [...occ, ...occ2].filter((d) => d.mes < '2026-03' || d.id >= 10) });
+  const p2 = D.planejarEdicao(dados2, occ2[0], { ...occ2[0], valor: 30000 }, 'proximas', '2026-03-10');
+  igual('aplica em março, abril e maio', p2.despesas.map((d) => [d.mes, d.valor]), [['2026-03', 30000], ['2026-04', 30000], ['2026-05', 30000]]);
+  igual('não toca meses anteriores', p2.despesas.some((d) => d.mes < '2026-03'), false);
+  const p3 = D.planejarEdicao(dados2, occ2[1], { ...occ2[1], valor: 1 }, 'esta', '2026-03-10');
+  igual('"somente esta" marca editadaIndividualmente e não muda a série', [p3.despesas.length, p3.despesas[0].editadaIndividualmente, p3.serie], [1, true, null]);
+  // Exclusão "esta e as próximas" de fixa
+  const ex = D.planejarExclusao(dados, alvo, 'proximas');
+  igual('exclui março; mantém abril (paga) e maio (editada)', ex.excluirIds, [3]);
+  igual('encerra a série no mês anterior', ex.serie.mesEncerramento, '2026-02');
+  const ex2 = D.planejarExclusao(dados, alvo, 'esta');
+  igual('"somente esta" registra o mês excluído', ex2.serie.mesesExcluidos, ['2026-03']);
+  // Parcelada: valor total recalculado
+  const par = D.montarParcelada(form({ valor: 30000, numeroParcelas: 3, mes: '2026-01' }), '2026-01');
+  const sp = { id: 9, ...par.serie };
+  const ps = par.despesas.map((d, i) => ({ ...d, id: 100 + i, serieId: 9 }));
+  const p4 = D.planejarEdicao(novosDados({ series: [sp], despesas: ps }), ps[1], { ...ps[1], valor: 15000 }, 'proximas');
+  igual('parcelada: edita parcelas 2 e 3 e recalcula total', [p4.despesas.map((d) => d.valor), p4.serie.valorTotal], [[15000, 15000], 40000]);
+}
+
+// =====================================================================
+secao('Conversão de câmbio');
+igual('10,00 USD × 3,6725 = 36,73 AED (arredonda)', converterCentavos(1000, 3.6725), 3673);
+igual('sem taxa → indefinida (null)', converterCentavos(1000, null), null);
+{
+  const dados = novosDados({ taxasCambio: [{ mes: '2026-11', moeda: 'USD', valorNaBase: 3.6725 }] });
+  igual('usa a taxa do mês da despesa', converter(dados, 10000, 'USD', '2026-11'), 36725);
+  igual('outro mês sem taxa → null', converter(dados, 10000, 'USD', '2026-10'), null);
+  const s = criarSoma();
+  s.add(dados, 10000, 'AED', '2026-11');
+  s.add(dados, 10000, 'BRL', '2026-11');
+  igual('valor sem taxa NÃO entra na soma', s.valor, 10000);
+  igual('e a soma avisa a moeda pendente', [s.pendente, s.moedas()], [true, ['BRL']]);
+  igual('moedasSemTaxa lista BRL', moedasSemTaxa(dados, [desp({ mes: '2026-11', valor: 1, moeda: 'BRL' }), desp({ mes: '2026-11', valor: 1, moeda: 'USD' })]), ['BRL']);
+}
+
+// =====================================================================
+secao('Orçamento: níveis e comprometido');
+igual('planejado 0 → sem', nivelOrcamento(0, 500), 'sem');
+igual('101 de 100 → estourado', nivelOrcamento(10000, 10001), 'estourado');
+igual('100 de 100 → limite', nivelOrcamento(10000, 10000), 'limite');
+igual('90 de 100 → alerta', nivelOrcamento(10000, 9000), 'alerta');
+igual('89,99 de 100 → ok', nivelOrcamento(10000, 8999), 'ok');
+{
+  const dados = novosDados({
+    orcamentos: [{ mes: '2026-11', categoriaId: MORADIA, valorPlanejado: 100000 }, { mes: '2026-11', categoriaId: 2, valorPlanejado: 10000 }],
+    despesas: [
+      paga('2026-11', 30000), desp({ mes: '2026-11', valor: 20000 }),                // budget: paga + pendente
+      desp({ mes: '2026-11', valor: 99999, status: 'prevista' }),                     // prevista não conta
+      paga('2026-11', 50000, { fonteSaldo: 'savings' }),                               // savings não consome
+      paga('2026-11', 50000, { fonteSaldo: 'manual:1' }),                              // saldo manual não consome
+      paga('2026-11', 9500, { categoriaId: 2 }),
+      paga('2026-11', 700, { categoriaId: LAZER }),                                    // sem orçamento
+    ],
+  });
+  const r = linhasOrcamento(dados, '2026-11');
+  const moradia = r.linhas.find((l) => l.categoria.id === MORADIA);
+  igual('comprometido = pago + pendente só do Budget', moradia.comprometido, 50000);
+  igual('ordenação: maior % primeiro; sem orçamento por último', r.linhas.map((l) => l.categoria.nome).slice(0, 3), ['Alimentação', 'Moradia', 'Lazer']);
+  igual('totais do mês', [r.totalPlanejado, r.totalComprometido], [110000, 60200]);
+  const cp = planejarCopiaOrcamento(novosDados({ orcamentos: [{ mes: '2026-10', categoriaId: 1, valorPlanejado: 5 }, { mes: '2026-11', categoriaId: 1, valorPlanejado: 7 }] }), '2026-11');
+  igual('cópia detecta categoria já preenchida', cp.conflitos.length, 1);
+}
+
+// =====================================================================
+secao('Saldos: Budget, Poupança e Savings (meses fechados)');
+{
+  const orc = ['2026-01', '2026-02', '2026-03'].map((mes) => ({ mes, categoriaId: MORADIA, valorPlanejado: 100000 }));
+  const dados = novosDados({
+    orcamentos: orc,
+    despesas: [
+      paga('2026-01', 80000),                                   // jan: sobra 200,00
+      paga('2026-01', 30000, { categoriaId: POUP }),            // jan: aporte poupança (fora do cálculo de sobra)
+      paga('2026-02', 120000),                                  // fev: estouro 200,00
+      paga('2026-03', 50000),                                   // mar: mês corrente (aberto)
+      desp({ mes: '2026-03', valor: 40000 }),                   // pendente não afeta saldos
+      paga('2026-02', 10000, { fonteSaldo: 'manual:1', dataPagamento: '2026-02-15' }),
+      paga('2026-03', 5000, { fonteSaldo: 'savings', dataPagamento: '2026-03-05' }),
+    ],
+    movimentacoes: [{ id: 1, saldoId: 1, tipo: 'entrada', valor: 50000, moeda: 'AED', data: '2026-02-10' }],
+  });
+  const atual = '2026-03';
+  igual('meses fechados até mar (mês atual = mar): jan e fev', mesesFechados(dados, '2026-03', atual), ['2026-01', '2026-02']);
+  igual('Budget de março = 1000 − 500 pagos = 500,00', budgetDoMes(dados, '2026-03').valor, 50000);
+  igual('Bonus = 500 entrada − 100 despesa = 400,00', saldoManual(dados, 1, '2026-03-31').valor, 40000);
+  igual('Bonus antes da despesa (14/02) = 500,00', saldoManual(dados, 1, '2026-02-14').valor, 50000);
+  igual('Poupança mar = 300 aporte − 200 estouro fev = 100,00', poupancaAte(dados, '2026-03', atual).valor, 10000);
+  igual('Savings mar = 200 sobra + 400 Bonus + 100 Poupança − 50 Savings = 650,00', savingsAte(dados, '2026-03', atual).valor, 65000);
+  igual('Savings fev = 200 + 400 + 100 = 700,00', savingsAte(dados, '2026-02', atual).valor, 70000);
+  igual('variação % Savings (650 vs 700) ≈ −7,14%', Math.round(variacaoPct(65000, 70000) * 100) / 100, -7.14);
+  igual('variação vazia quando o anterior é 0', variacaoPct(100, 0), null);
+  // Se o mês atual fosse fevereiro, fevereiro ainda está aberto: sem estouro nem sobra dele
+  igual('com mês atual = fev: Poupança fev = 300 (estouro de fev ainda não conta)', poupancaAte(dados, '2026-02', '2026-02').valor, 30000);
+  igual('com mês atual = fev: Savings fev = 200 + 400 + 300 = 900,00', savingsAte(dados, '2026-02', '2026-02').valor, 90000);
+  // Poupança pode ficar negativa
+  const d2 = novosDados({ orcamentos: [{ mes: '2026-01', categoriaId: 1, valorPlanejado: 1000 }], despesas: [paga('2026-01', 5000)] });
+  igual('Poupança pode ficar negativa (só estouro)', poupancaAte(d2, '2026-02', '2026-03').valor, -4000);
+  // Sem taxa
+  const d3 = novosDados({ movimentacoes: [{ id: 1, saldoId: 2, tipo: 'entrada', valor: 1000, moeda: 'USD', data: '2026-03-01' }, { id: 2, saldoId: 2, tipo: 'entrada', valor: 700, moeda: 'AED', data: '2026-03-01' }] });
+  const inv = saldoManual(d3, 2, '2026-03-31');
+  igual('saldo com moeda sem taxa: soma o resto e marca pendente', [inv.valor, inv.pendente], [700, true]);
+  igual('movimentações: inclui despesa paga com saldo manual (só leitura)', listaMovimentacoes(dados).map((m) => m.origem), ['despesa', 'manual']);
+  igual('evolução tem 12 pontos', evolucao(dados, 'savings', '2026-03', atual).length, 12);
+}
+
+// =====================================================================
+secao('Dashboard');
+{
+  const dados = novosDados({
+    orcamentos: [{ mes: '2026-11', categoriaId: MORADIA, valorPlanejado: 100000 }],
+    despesas: [
+      paga('2026-11', 30000, { dataPagamento: '2026-11-05' }), desp({ mes: '2026-11', valor: 20000, dataVencimento: '2026-11-20' }),
+      paga('2026-10', 25000),
+      desp({ mes: '2026-12', valor: 1000, status: 'prevista' }), desp({ mes: '2027-10', valor: 1000, status: 'prevista' }),
+      desp({ mes: '2027-11', valor: 1000, status: 'prevista' }), // 12 meses depois: fora
+    ],
+  });
+  const r = resumoDashboard(dados, '2026-11');
+  igual('pago / pendente / comprometido', [r.pago, r.pendente, r.comprometido], [30000, 20000, 50000]);
+  igual('disponível e % consumido', [r.disponivel, r.pctConsumido], [50000, 50]);
+  igual('variação vs. mês anterior = +100%', r.variacao, 100);
+  igual('compromissos futuros: próximos 11 meses', r.futuros, 2000);
+  igual('acumulado: dia 5 = 300, dia 20 = 500', [r.acumulado[4], r.acumulado[19], r.acumulado[29]], [30000, 50000, 50000]);
+}
+
+// =====================================================================
+secao('Backup');
+{
+  const valido = { app: 'controle-financeiro', versaoEsquema: 1, dados: { ...novosDados(), config: [novosDados().config], despesas: [paga('2026-01', 100)] } };
+  igual('backup válido gera resumo', validarBackup(valido).despesas, 1);
+  lanca('arquivo de outro app é recusado', () => validarBackup({ foo: 1 }), 'não é um backup');
+  lanca('backup de versão mais nova é recusado', () => validarBackup({ ...valido, versaoEsquema: 99 }), 'versão mais nova');
+}
+
+// =====================================================================
+secao('Banco de dados (IndexedDB de teste)');
+{
+  await new Promise((res) => { const r = indexedDB.deleteDatabase('cf-testes'); r.onsuccess = r.onerror = r.onblocked = () => res(); });
+  usarBanco('cf-testes');
+  await D.criarDespesa(form({ tipo: 'fixa', nome: 'Internet', valor: 30000, mes: '2026-09' }), '2026-11');
+  await Promise.all([D.garantirFixas(['2026-10', '2026-11']), D.garantirFixas(['2026-10', '2026-11'])]);
+  await D.garantirFixas(['2026-11']);
+  const ds = await todos('despesas');
+  igual('fixa gerada 1× por mês mesmo com chamadas simultâneas (set, out, nov)', ds.map((d) => d.mes).sort(), ['2026-09', '2026-10', '2026-11']);
+  let erro = null;
+  const { id: _semId, ...copia } = ds.find((d) => d.mes === '2026-11');
+  try { await tx(['despesas'], 'readwrite', (l) => { l.despesas.add(copia); }); } catch (e) { erro = e.name; }
+  igual('índice único (série + mês) impede duplicata no banco', erro, 'ConstraintError');
+  await D.criarDespesa(form({ tipo: 'parcelada', valor: 100, numeroParcelas: 3, mes: '2026-11' }), '2026-11');
+  const parc = (await todos('despesas')).filter((d) => d.tipo === 'parcelada');
+  igual('parcelada grava todas as parcelas de uma vez', parc.map((d) => d.valor), [33, 33, 34]);
+}
+} catch (e) {
+  secao('ERRO INESPERADO');
+  registrar(false, e.message, e.stack);
+}
+
+const resumo = document.getElementById('resumo');
+resumo.className = falhas ? 'falha' : 'ok';
+resumo.textContent = `RESULTADO: ${ok} ok, ${falhas} falha(s)`;
+const nomesFalhas = [...document.querySelectorAll('li.falha')].map((li) => li.textContent).join(' | ');
+document.title = resumo.textContent + (nomesFalhas ? ` — ${nomesFalhas}` : '');
+</script>
+</body>
+</html>

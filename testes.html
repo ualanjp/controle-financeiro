@@ -27,7 +27,9 @@ import * as D from './assets/js/servicos/despesas.js';
 import { nivelOrcamento, linhasOrcamento, planejarCopiaOrcamento } from './assets/js/servicos/orcamento.js';
 import { budgetDoMes, poupancaAte, savingsAte, saldoManual, mesesFechados, variacaoPct, listaMovimentacoes, evolucao } from './assets/js/servicos/saldos.js';
 import { resumoDashboard } from './assets/js/servicos/dashboard.js';
-import { validarBackup } from './assets/js/servicos/backup.js';
+import { validarBackup, importarDadosIniciais, validarDadosIniciais } from './assets/js/servicos/backup.js';
+import { carregarTudo, criarEsquemaV1 } from './assets/js/db.js';
+import * as Q from './assets/js/servicos/rapido.js';
 
 const saida = document.getElementById('saida');
 let ok = 0, falhas = 0, grupo = null;
@@ -268,6 +270,83 @@ secao('Backup');
 }
 
 // =====================================================================
+secao('Lançamento rápido — leitura do texto');
+{
+  const L = (t, ap) => Q.interpretarLinha(t, ap);
+  const resumir = (r) => r && (r.erro ? { erro: r.erro } : { tipo: r.tipo, valor: r.valor, descricao: r.descricao, grupo: r.grupo, categoria: r.categoria, classe: r.classe, data: r.data });
+  igual('saiu 30,00 almoço', resumir(L('saiu 30,00 almoço')),
+    { tipo: 'saida', valor: 3000, descricao: 'almoço', grupo: 'pessoal', categoria: 'Alimentação', classe: 'necessidade', data: null });
+  igual('🟢 entrou 500,00 caetano → entrada da oficina', resumir(L('🟢 entrou 500,00 caetano')),
+    { tipo: 'entrada', valor: 50000, descricao: 'caetano', grupo: 'oficina', categoria: null, classe: null, data: null });
+  igual('saiu 2.600,00 celular novo…', [L('saiu 2.600,00 celular novo tive que comprar sabosta').valor, L('saiu 2.600,00 celular novo').categoria], [260000, 'Diária']);
+  igual('fornecedor → Oficina / investimento', resumir(L('🟥 saiu 300,00 RDM fornecedor mola Fiat doblo')),
+    { tipo: 'saida', valor: 30000, descricao: 'RDM fornecedor mola Fiat doblo', grupo: 'oficina', categoria: 'Oficina', classe: 'investimento', data: null });
+  igual('"oficina" no final é tirado da descrição', [L('saiu 542,00 Julio RDM oficina').descricao, L('saiu 542,00 Julio RDM oficina').grupo], ['Julio RDM', 'oficina']);
+  igual('"pessoal" no final vale até para entrada', [L('entrou 200,00 aluguel pessoal').grupo, L('entrou 200,00 aluguel pessoal').descricao], ['pessoal', 'aluguel']);
+  igual('Saiu (maiúsculo) 34,00 Uber → Transporte', L('Saiu 34,00 Uber Maria').categoria, 'Transporte');
+  igual('centavos 103,19', L('saiu 103,19 acelerador bike eletrica').valor, 10319);
+  igual('assinatura de jogo → PC / desejo', [L('saiu 90,00 assinatura jogo canal').categoria, L('saiu 90,00 assinatura jogo canal').classe], ['PC', 'desejo']);
+  igual('imposto → juros', L('saiu 178,00 imposto camionete').classe, 'juros');
+  igual('janta oficina: continua Alimentação, grupo Oficina', [L('saiu 32,00 janta oficina').grupo, L('saiu 32,00 janta oficina').categoria], ['oficina', 'Alimentação']);
+  igual('sem categoria + oficina → categoria Oficina', L('saiu 50,00 barbeiro oficina').categoria, 'Oficina');
+  igual('WhatsApp [dd/mm/aaaa hh:mm] Nome: …', resumir(L('[05/11/2026 09:04] Ualan: 🟢 entrou 500,00 caetano')).data, '2026-11-05');
+  igual('WhatsApp [hh:mm, dd/mm/aaaa] Nome: …', [L('[09:04, 04/11/2026] Ualan Jonas: saiu 30,00 almoço').data, L('[09:04, 04/11/2026] Ualan Jonas: saiu 30,00 almoço').descricao], ['2026-11-04', 'almoço']);
+  igual('WhatsApp dd/mm/aa hh:mm - Nome: …', [L('03/11/26 08:36 - Ualan: saiu 20,00 inseticida').data, L('03/11/26 08:36 - Ualan: saiu 20,00 inseticida').categoria], ['2026-11-03', 'Casa']);
+  igual('valor depois da descrição (saiu almoço 30,00)', [L('saiu almoço 30,00').valor, L('saiu almoço 30,00').descricao], [3000, 'almoço']);
+  igual('sem valor → erro', resumir(L('saiu almoço')), { erro: 'Faltou o valor' });
+  igual('sem saiu/entrou mas com valor → erro', resumir(L('almoço 30,00')), { erro: 'Comece com "saiu" ou "entrou"' });
+  igual('começa pelo valor → saída', [L('30,00 almoço').tipo, L('30,00 almoço').valor], ['saida', 3000]);
+  igual('linhas de conversa/datas são ignoradas', [L('Hoje'), L('05/11/2026'), L('ok, valeu'), L('')], [null, null, null, null]);
+  igual('R$ e milhar: entrou R$ 1.455,00', L('entrou R$ 1.455,00 amarelinho').valor, 145500);
+  igual('1570 sem vírgula', L('saiu 1570 fornecedor cms').valor, 157000);
+  const ap = { 'crc entregas': { chave: 'crc entregas', grupo: 'oficina', categoria: 'Oficina', classe: 'investimento' } };
+  igual('o que foi corrigido antes é lembrado', [L('saiu 45,00 crc entregas', ap).grupo, L('saiu 45,00 CRC Entregas', ap).categoria], ['oficina', 'Oficina']);
+  const lanc = [{ tipo: 'saida', valor: 3000, descricao: 'Almoço', data: '2026-11-05' }];
+  const t = Q.interpretarTexto('saiu 30,00 almoço\n\nentrou 450,00 Edgar\nsaiu janta\nHoje', { hoje: '2026-11-05', lancamentos: lanc });
+  igual('várias linhas: 2 itens, 1 erro, repetido marcado', [t.itens.length, t.erros.length, t.itens[0].duplicado, t.itens[1].duplicado, t.itens[1].data], [2, 1, true, false, '2026-11-05']);
+}
+
+secao('Resumo do mês / histórico');
+{
+  let id = 1;
+  const fx = (o) => ({ id: id++, tipo: 'despesa', descricao: 'X', valor: 100, dia: 10, grupo: 'oficina', inicio: '2026-11', fim: null, ...o });
+  const lc = (o) => ({ id: id++, tipo: 'saida', valor: 100, descricao: 'X', grupo: 'pessoal', categoria: 'Diária', classe: 'desejo', data: '2026-11-05', mes: '2026-11', ...o });
+  const dados = {
+    fixos: [
+      fx({ tipo: 'receita', descricao: 'Aluguéis', valor: 510000, grupo: 'pessoal' }),
+      fx({ descricao: 'Consórcio A', valor: 1000000 }),
+      fx({ descricao: 'Aluguel terreno', valor: 192045 }),
+      fx({ descricao: 'Internet', valor: 83331, grupo: 'pessoal' }),
+      fx({ descricao: 'Encerrada', valor: 99999, fim: '2026-10', inicio: '2026-01' }),
+      fx({ descricao: 'Futura', valor: 99999, inicio: '2026-12' }),
+    ],
+    fixosMes: [],
+    lancamentos: [
+      lc({ tipo: 'entrada', valor: 1955538, grupo: 'oficina', categoria: null, classe: null }),
+      lc({ valor: 1000000, grupo: 'oficina', categoria: 'Oficina', classe: 'investimento' }),
+      lc({ valor: 140395, categoria: 'Alimentação', classe: 'necessidade' }),
+      lc({ valor: 777, mes: '2026-10', data: '2026-10-31' }),
+    ],
+    historico: [{ mes: '2026-08', entradas: 2465538, saidas: 2415771 }, { mes: '2026-10', entradas: 1, saidas: 1 }],
+  };
+  const r = Q.resumoMes(dados, '2026-11');
+  igual('as 4 caixas da planilha', [r.receitasFixas, r.receitasVariaveis, r.despesasFixas, r.despesasVariaveis], [510000, 1955538, 1275376, 1140395]);
+  igual('situação real = 497,67', r.resultado, 49767);
+  igual('oficina × pessoal', r.porGrupo.map((g) => [g.grupo, g.entradas, g.saidas]), [['oficina', 1955538, 2192045], ['pessoal', 510000, 223726]]);
+  igual('por categoria (maior primeiro) com %', r.porCategoria.map((c) => [c.chave, c.pct]), [['Oficina', 87.7], ['Alimentação', 12.3]]);
+  igual('consórcios somados pelo nome', r.fixas.consorcios, 1000000);
+  dados.fixosMes = [{ fixoId: 4, mes: '2026-11', ok: true, valor: 90000 }];
+  const r2 = Q.resumoMes(dados, '2026-11');
+  igual('valor só deste mês + marcada como paga', [r2.despesasFixas, r2.fixas.pagas, r2.fixas.faltaPagar], [1282045, 1, 1192045]);
+  const h = Q.demonstrativo(dados, '2026-11');
+  igual('histórico: meses à mão + do app (o app vence)', h.map((l) => [l.mes, l.origem]), [['2026-01', 'app'], ['2026-02', 'app'], ['2026-03', 'app'], ['2026-04', 'app'], ['2026-05', 'app'], ['2026-06', 'app'], ['2026-07', 'app'], ['2026-08', 'app'], ['2026-09', 'app'], ['2026-10', 'app'], ['2026-11', 'app']]);
+  dados.fixos = dados.fixos.filter((f) => f.descricao !== 'Encerrada');
+  const h2 = Q.demonstrativo(dados, '2026-11');
+  igual('histórico: ago (manual), out (app), nov (app)', h2.map((l) => [l.mes, l.origem, l.resultado]), [['2026-08', 'manual', 49767], ['2026-10', 'app', -777], ['2026-11', 'app', 43098]]);
+  igual('acumulado (compilado)', h2.map((l) => l.acumulado), [49767, 48990, 92088]);
+}
+
+// =====================================================================
 secao('Banco de dados (IndexedDB de teste)');
 {
   await new Promise((res) => { const r = indexedDB.deleteDatabase('cf-testes'); r.onsuccess = r.onerror = r.onblocked = () => res(); });
@@ -284,6 +363,45 @@ secao('Banco de dados (IndexedDB de teste)');
   await D.criarDespesa(form({ tipo: 'parcelada', valor: 100, numeroParcelas: 3, mes: '2026-11' }), '2026-11');
   const parc = (await todos('despesas')).filter((d) => d.tipo === 'parcelada');
   igual('parcelada grava todas as parcelas de uma vez', parc.map((d) => d.valor), [33, 33, 34]);
+
+  // Modo simples
+  const [l1] = await Q.salvarLancamentos([{ tipo: 'saida', valor: 4500, descricao: 'crc entregas', grupo: 'pessoal', categoria: 'Diária', classe: 'desejo', data: '2026-11-05' }]);
+  await Q.aprender('crc entregas', { grupo: 'oficina', categoria: 'Oficina', classe: 'investimento' });
+  let dd = await carregarTudo();
+  igual('lançamento salvo com mês', [dd.lancamentos.length, dd.lancamentos[0].mes, typeof l1.id], [1, '2026-11', 'number']);
+  igual('aprendizado aplicado na próxima vez', Q.interpretarLinha('saiu 45,00 crc entregas', Q.mapaAprendizado(dd)).grupo, 'oficina');
+  const fid = await Q.salvarFixo({ tipo: 'despesa', descricao: 'Consórcio', valor: 1000, dia: 20, grupo: 'oficina', inicio: '2026-09' });
+  await Q.marcarFixo(fid, '2026-10', true);
+  await Q.salvarFixo({ id: fid, tipo: 'despesa', descricao: 'Consórcio', valor: 2000, dia: 20, grupo: 'oficina', inicio: '2026-09', fim: null }, '2026-11');
+  dd = await carregarTudo();
+  igual('mudar o valor não altera meses passados', ['2026-09', '2026-10', '2026-11', '2026-12'].map((m) => Q.resumoMes(dd, m).despesasFixas), [1000, 1000, 2000, 2000]);
+  igual('status pago do mês passado mantido', Q.fixosDoMes(dd, '2026-10')[0].ok, true);
+  const ini = { app: 'controle-financeiro', tipo: 'dados-iniciais', historico: [{ mes: '2026-08', entradas: 10, saidas: 5 }],
+    fixos: [{ tipo: 'receita', descricao: 'Aluguel bar', valor: 100000, dia: 10, grupo: 'pessoal', inicio: '2026-11' }, { tipo: 'despesa', descricao: 'consórcio', valor: 2000, dia: 20, grupo: 'oficina', inicio: '2026-11' }] };
+  igual('dados iniciais validados', validarDadosIniciais(ini), { fixos: 2, historico: 1 });
+  await importarDadosIniciais(ini);
+  await importarDadosIniciais(ini);
+  dd = await carregarTudo();
+  igual('dados iniciais: importar 2× não duplica (nem a conta que já existia)', [dd.fixos.length, dd.historico.length], [2, 1]);
+  await Q.excluirFixo(fid);
+  dd = await carregarTudo();
+  igual('excluir conta fixa apaga os status dela', [dd.fixos.length, dd.fixosMes.filter((x) => x.fixoId === fid).length], [1, 0]);
+
+  // Atualização de um banco da versão 1 (app antigo) para a 2
+  await new Promise((res) => { const r = indexedDB.deleteDatabase('cf-testes-v1'); r.onsuccess = r.onerror = r.onblocked = () => res(); });
+  await new Promise((res, rej) => {
+    const r = indexedDB.open('cf-testes-v1', 1);
+    r.onupgradeneeded = () => criarEsquemaV1(r.result);
+    r.onsuccess = () => {
+      const t = r.result.transaction('config', 'readwrite');
+      t.objectStore('config').put({ chave: 'principal', moedaBase: 'BRL', outrasMoedas: [] });
+      t.oncomplete = () => { r.result.close(); res(); };
+    };
+    r.onerror = () => rej(r.error);
+  });
+  usarBanco('cf-testes-v1');
+  dd = await carregarTudo();
+  igual('banco antigo atualizado sem perder dados', [dd.config.moedaBase, dd.lancamentos.length, dd.fixos.length], ['BRL', 0, 0]);
 }
 } catch (e) {
   secao('ERRO INESPERADO');

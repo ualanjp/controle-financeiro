@@ -1,9 +1,11 @@
 // Acesso ao IndexedDB (um object store por entidade). Sem regras de negócio aqui.
 
-export const VERSAO_ESQUEMA = 1;
+export const VERSAO_ESQUEMA = 2;
+/** Stores criados na versão 2 (modo simples). Backups antigos não os têm. */
+export const STORES_V2 = ['lancamentos', 'fixos', 'fixosMes', 'historico', 'aprendizado'];
 export const STORES = [
   'categorias', 'formasPagamento', 'taxasCambio', 'orcamentos', 'series',
-  'despesas', 'saldosManuais', 'movimentacoes', 'config',
+  'despesas', 'saldosManuais', 'movimentacoes', 'config', ...STORES_V2,
 ];
 
 let nomeBanco = 'controle-financeiro';
@@ -16,7 +18,19 @@ export function usarBanco(nome) {
   conexao = null;
 }
 
-function criarEsquema(db) {
+function criarEsquema(db, versaoAntiga) {
+  if (versaoAntiga < 1) criarEsquemaV1(db);
+  if (versaoAntiga < 2) {
+    const lanc = db.createObjectStore('lancamentos', { keyPath: 'id', autoIncrement: true });
+    lanc.createIndex('mes', 'mes');
+    db.createObjectStore('fixos', { keyPath: 'id', autoIncrement: true });
+    db.createObjectStore('fixosMes', { keyPath: ['fixoId', 'mes'] });
+    db.createObjectStore('historico', { keyPath: 'mes' });
+    db.createObjectStore('aprendizado', { keyPath: 'chave' });
+  }
+}
+
+export function criarEsquemaV1(db) {
   const cat = db.createObjectStore('categorias', { keyPath: 'id', autoIncrement: true });
   cat.createIndex('nome', 'nome', { unique: true });
   const fp = db.createObjectStore('formasPagamento', { keyPath: 'id', autoIncrement: true });
@@ -38,7 +52,7 @@ export function abrir() {
   if (!conexao) {
     conexao = new Promise((res, rej) => {
       const r = indexedDB.open(nomeBanco, VERSAO_ESQUEMA);
-      r.onupgradeneeded = () => criarEsquema(r.result);
+      r.onupgradeneeded = (e) => criarEsquema(r.result, e.oldVersion);
       r.onsuccess = () => {
         const db = r.result;
         db.onversionchange = () => { db.close(); conexao = null; };

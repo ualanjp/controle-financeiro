@@ -1,6 +1,6 @@
 // Service worker: guarda todos os arquivos do app no celular (cache-first).
 // IMPORTANTE: ao publicar uma versão nova, aumente o número em CACHE_NAME.
-const CACHE_NAME = 'controle-financeiro-v2';
+const CACHE_NAME = 'controle-financeiro-v3';
 
 const ARQUIVOS = [
   './',
@@ -23,7 +23,12 @@ const ARQUIVOS = [
   './assets/js/servicos/dashboard.js',
   './assets/js/servicos/despesas.js',
   './assets/js/servicos/orcamento.js',
+  './assets/js/servicos/rapido.js',
   './assets/js/servicos/saldos.js',
+  './assets/js/telas/rapido.js',
+  './assets/js/telas/resumo.js',
+  './assets/js/telas/fixas.js',
+  './assets/js/telas/historico.js',
   './assets/js/telas/backup.js',
   './assets/js/telas/cambio.js',
   './assets/js/telas/categorias.js',

@@ -18,6 +18,17 @@ Abra o endereço no celular **com internet** (de preferência no Wi-Fi).
 2. Toque em **Compartilhar** (quadrado com seta para cima, embaixo da tela).
 3. Toque em **"Adicionar à Tela de Início"** → **Adicionar**.
 
+## Como usar no dia a dia
+
+- **⚡ Lançar**: escreva como no WhatsApp, por exemplo `saiu 30,00 almoço`, `entrou 450,00 Edgar` ou `saiu 542,00 Julio RDM oficina`.
+  - Sem nada no final: *entrou* conta como Oficina, *saiu* como Pessoal, e *fornecedor* sempre como Oficina.
+  - Dá para colar várias mensagens do WhatsApp de uma vez.
+  - Toque num lançamento para corrigir. O app aprende com a correção.
+- **📋 Resumo**: o resumo do mês, como na planilha (receitas e despesas fixas e variáveis, situação real, Oficina × Pessoal, onde foi o dinheiro). Tem um botão para mandar o resumo pelo WhatsApp.
+- **📌 Fixas**: contas que se repetem todo mês. Toque em **A pagar** para marcar como paga.
+- **📈 Histórico**: cada mês com entradas, saídas, resultado e acumulado. Os meses antigos da planilha podem ser digitados aqui.
+- **☰ Mais**: Backup, Configurações e o "modo completo" (as telas detalhadas originais).
+
 ## Testar sem internet
 
 1. Abra o app pelo ícone **uma vez com internet** e espere carregar.

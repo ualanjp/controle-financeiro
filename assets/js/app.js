@@ -14,8 +14,19 @@ import * as categorias from './telas/categorias.js';
 import * as formas from './telas/formas.js';
 import * as configuracoes from './telas/configuracoes.js';
 import * as backup from './telas/backup.js';
+import * as rapido from './telas/rapido.js';
+import * as resumo from './telas/resumo.js';
+import * as fixas from './telas/fixas.js';
+import * as historico from './telas/historico.js';
 
-const ROTAS = { inicio, despesas, orcamento, cambio, mais, saldos, categorias, formas, configuracoes, backup };
+const ROTAS = {
+  rapido, resumo, fixas, historico,
+  inicio, despesas, orcamento, cambio, mais, saldos, categorias, formas, configuracoes, backup,
+};
+const INICIAL = 'rapido';
+const NA_BARRA = ['rapido', 'resumo', 'fixas', 'historico', 'mais'];
+// Telas do modo completo ficam dentro de "Mais": voltam para lá e marcam essa aba.
+const paiDe = (nome, tela) => tela.pai || (NA_BARRA.includes(nome) ? null : 'mais');
 
 const $ = (id) => document.getElementById(id);
 
@@ -32,7 +43,7 @@ function definirMes(m) {
 
 function rotaAtual() {
   const partes = location.hash.replace(/^#\/?/, '').split('/');
-  const nome = ROTAS[partes[0]] ? partes[0] : 'inicio';
+  const nome = ROTAS[partes[0]] ? partes[0] : INICIAL;
   return { nome, params: partes.slice(1).filter(Boolean) };
 }
 
@@ -55,10 +66,11 @@ async function renderizar({ manterRolagem = false } = {}) {
     destruirGraficos();
     $('titulo').textContent = tela.titulo;
     document.title = `${tela.titulo} · Controle Financeiro`;
-    $('voltar').hidden = !tela.pai;
+    $('voltar').hidden = !paiDe(nome, tela);
     $('nav-mes').hidden = !tela.usaMes;
     $('mes-nome').textContent = nomeMes(mesSel) + (mesSel === mesAtual ? '' : ' •');
-    const aba = tela.aba || nome;
+    let aba = tela.aba || nome;
+    if (!NA_BARRA.includes(aba)) aba = 'mais';
     document.querySelectorAll('#barra a').forEach((a) => a.classList.toggle('ativo', a.dataset.aba === aba));
 
     main.innerHTML = '';
@@ -79,8 +91,8 @@ function ligarLayout() {
   $('mes-prox').addEventListener('click', () => definirMes(addMes(mesSel, 1)));
   $('mes-nome').addEventListener('click', () => definirMes(mesHoje()));
   $('voltar').addEventListener('click', () => {
-    const tela = ROTAS[rotaAtual().nome];
-    location.hash = `#/${tela.pai || 'inicio'}`;
+    const { nome } = rotaAtual();
+    location.hash = `#/${paiDe(nome, ROTAS[nome]) || INICIAL}`;
   });
   window.addEventListener('hashchange', () => renderizar());
   // Ao voltar para o app (ex.: dia seguinte), atualiza status "prevista" → "pendente".

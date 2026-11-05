@@ -2,6 +2,7 @@ import { formatarData, difDias } from '../util.js';
 import { abrirFolha, confirmar, toast, mostrarErro } from '../ui.js';
 import {
   gerarBackup, nomeArquivoBackup, validarBackup, textoResumo, restaurarBackup, apagarTudo, registrarBackup,
+  ehDadosIniciais, validarDadosIniciais, importarDadosIniciais,
 } from '../servicos/backup.js';
 
 export const titulo = 'Backup';
@@ -43,7 +44,7 @@ export async function render(ctx) {
     <section class="cartao">
       <h2>Importar</h2>
       <p class="dica">Escolha um arquivo <code>controle-financeiro-AAAA-MM-DD.json</code>. Os dados atuais serão <b>substituídos</b> (você confirma antes).</p>
-      <label class="btn btn-bloco" style="margin:0">📂 Escolher arquivo de backup<input type="file" accept=".json,application/json" hidden data-importar></label>
+      <label class="btn btn-bloco" style="margin:0">📂 Escolher arquivo de backup<input type="file" accept=".json,application/json,application/octet-stream,text/plain" hidden data-importar></label>
     </section>
     <section class="cartao">
       <h2 class="cor-erro">Apagar todos os dados</h2>
@@ -78,6 +79,15 @@ export async function render(ctx) {
     try {
       let obj;
       try { obj = JSON.parse(await arq.text()); } catch { throw new Error('Arquivo inválido (não é JSON).'); }
+      if (ehDadosIniciais(obj)) {
+        const n = validarDadosIniciais(obj);
+        const ok = await confirmar(`Arquivo de dados iniciais com:\n${n.fixos} contas fixas e ${n.historico} meses de histórico.\n\nEles serão ADICIONADOS (nada do que você já lançou é apagado; contas fixas repetidas são ignoradas).`, { titulo: 'Importar dados iniciais', ok: 'Adicionar' });
+        if (!ok) return;
+        const r = await importarDadosIniciais(obj);
+        toast(`✓ ${r.fixos} contas fixas e ${r.historico} meses adicionados`);
+        ctx.atualizar();
+        return;
+      }
       const resumo = validarBackup(obj);
       const quando = obj.exportadoEm ? ` de ${formatarData(obj.exportadoEm.slice(0, 10))}` : '';
       const ok = await confirmar(`Backup${quando} com:\n${textoResumo(resumo)}.\n\nIsso SUBSTITUI todos os dados atuais deste aparelho.`, { titulo: 'Importar backup', ok: 'Substituir dados', perigo: true });
@@ -107,7 +117,7 @@ export async function render(ctx) {
         await apagarTudo();
         f.fechar();
         toast('Todos os dados foram apagados');
-        location.hash = '#/inicio';
+        location.hash = '#/rapido';
         ctx.atualizar();
       } catch (err) { mostrarErro(err); }
     });

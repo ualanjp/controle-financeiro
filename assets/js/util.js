@@ -1,6 +1,6 @@
 // Funções utilitárias puras: datas/meses, centavos, formatação.
 
-export const VERSAO_APP = '1.0.0';
+export const VERSAO_APP = '1.1.0';
 
 export const p2 = (n) => String(n).padStart(2, '0');
 

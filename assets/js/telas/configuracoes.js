@@ -15,7 +15,7 @@ export async function render(ctx) {
   el.innerHTML = `
     <form class="cartao form" novalidate>
       <h2>Moedas</h2>
-      <p class="dica">Use códigos de 3 letras (ex.: AED, USD, BRL, EUR). Orçamentos e saldos são mostrados na moeda-base.</p>
+      <p class="dica">Use códigos de 3 letras (ex.: BRL, USD, EUR). Orçamentos e saldos são mostrados na moeda-base.</p>
       <label>Moeda-base<input name="base" value="${esc(c.moedaBase)}" maxlength="3" autocapitalize="characters" style="text-transform:uppercase"></label>
       <div class="linha2">
         <label>Outra moeda 1<input name="m1" value="${esc(c.outrasMoedas[0] || '')}" maxlength="3" autocapitalize="characters" style="text-transform:uppercase"></label>

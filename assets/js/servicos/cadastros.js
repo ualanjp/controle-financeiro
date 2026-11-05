@@ -1,5 +1,5 @@
 // Categorias, formas de pagamento, saldos manuais, movimentações e configurações.
-import { tx, obter, salvar, excluir, VERSAO_ESQUEMA } from '../db.js';
+import { tx, obter, todos, salvar, excluir, VERSAO_ESQUEMA } from '../db.js';
 import { ehData } from '../util.js';
 import { fonteManual } from './despesas.js';
 
@@ -13,7 +13,7 @@ export const SALDOS_PADRAO = ['Bonus', 'Investido'];
 
 export function configPadrao() {
   return {
-    chave: 'principal', moedaBase: 'AED', outrasMoedas: ['USD', 'BRL'],
+    chave: 'principal', moedaBase: 'BRL', outrasMoedas: ['USD', 'EUR'],
     versaoEsquema: VERSAO_ESQUEMA, categoriaPoupancaId: null, ultimoBackup: null,
   };
 }
@@ -33,7 +33,13 @@ export function semearDados() {
   });
 }
 export async function garantirDadosIniciais() {
-  if (!(await obter('config', 'principal'))) await semearDados();
+  const cfg = await obter('config', 'principal');
+  if (!cfg) return semearDados();
+  // Instalações da versão antiga (padrão AED) ainda sem nenhum lançamento passam para BRL.
+  if (cfg.moedaBase === 'AED' && String(cfg.outrasMoedas) === 'USD,BRL') {
+    const usados = await Promise.all(['despesas', 'series', 'taxasCambio', 'orcamentos', 'movimentacoes'].map((s) => todos(s)));
+    if (usados.every((l) => !l.length)) await salvar('config', { ...cfg, moedaBase: 'BRL', outrasMoedas: ['USD', 'EUR'] });
+  }
 }
 
 const norm = (s) => String(s || '').trim().toLocaleLowerCase('pt-BR');

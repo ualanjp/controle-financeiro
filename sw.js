@@ -1,6 +1,6 @@
 // Service worker: guarda todos os arquivos do app no celular (cache-first).
 // IMPORTANTE: ao publicar uma versão nova, aumente o número em CACHE_NAME.
-const CACHE_NAME = 'controle-financeiro-v1';
+const CACHE_NAME = 'controle-financeiro-v2';
 
 const ARQUIVOS = [
   './',
